@@ -2176,10 +2176,11 @@ static void ImGui_ImplVulkan_RenderWindow(ImGuiViewport* viewport, void*)
     }
 
     ImGui_ImplVulkanH_Frame* fd = nullptr;
-    ImGui_ImplVulkanH_FrameSemaphores* fsd = &wd->FrameSemaphores[wd->SemaphoreIndex];
+    ImGui_ImplVulkanH_FrameSemaphores* acquire_fsd = &wd->FrameSemaphores[wd->SemaphoreIndex];
+    ImGui_ImplVulkanH_FrameSemaphores* render_fsd = nullptr;
     {
         {
-            err = vkAcquireNextImageKHR(v->Device, wd->Swapchain, UINT64_MAX, fsd->ImageAcquiredSemaphore, VK_NULL_HANDLE, &wd->FrameIndex);
+            err = vkAcquireNextImageKHR(v->Device, wd->Swapchain, UINT64_MAX, acquire_fsd->ImageAcquiredSemaphore, VK_NULL_HANDLE, &wd->FrameIndex);
             if (err == VK_ERROR_OUT_OF_DATE_KHR)
             {
                 vd->SwapChainNeedRebuild = true; // Since we are not going to swap this frame anyway, it's ok that recreation happens on next frame.
@@ -2190,6 +2191,7 @@ static void ImGui_ImplVulkan_RenderWindow(ImGuiViewport* viewport, void*)
             else
                 check_vk_result(err);
             fd = &wd->Frames[wd->FrameIndex];
+            render_fsd = &wd->FrameSemaphores[wd->FrameIndex];
         }
         for (;;)
         {
@@ -2291,12 +2293,12 @@ static void ImGui_ImplVulkan_RenderWindow(ImGuiViewport* viewport, void*)
             VkSubmitInfo info = {};
             info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
             info.waitSemaphoreCount = 1;
-            info.pWaitSemaphores = &fsd->ImageAcquiredSemaphore;
+            info.pWaitSemaphores = &acquire_fsd->ImageAcquiredSemaphore;
             info.pWaitDstStageMask = &wait_stage;
             info.commandBufferCount = 1;
             info.pCommandBuffers = &fd->CommandBuffer;
             info.signalSemaphoreCount = 1;
-            info.pSignalSemaphores = &fsd->RenderCompleteSemaphore;
+            info.pSignalSemaphores = &render_fsd->RenderCompleteSemaphore;
 
             err = vkEndCommandBuffer(fd->CommandBuffer);
             check_vk_result(err);
@@ -2323,7 +2325,9 @@ static void ImGui_ImplVulkan_SwapBuffers(ImGuiViewport* viewport, void*)
     VkResult err;
     uint32_t present_index = wd->FrameIndex;
 
-    ImGui_ImplVulkanH_FrameSemaphores* fsd = &wd->FrameSemaphores[wd->SemaphoreIndex];
+    // Semaphores waited by vkQueuePresentKHR may only be reused after the
+    // associated swapchain image is acquired again.
+    ImGui_ImplVulkanH_FrameSemaphores* fsd = &wd->FrameSemaphores[present_index];
     VkPresentInfoKHR info = {};
     info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     info.waitSemaphoreCount = 1;
